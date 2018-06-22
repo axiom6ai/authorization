@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"authorization/common"
 	"authorization/model"
 	"bufio"
 	"encoding/base64"
@@ -13,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"authorization/common"
+	"golang.org/x/crypto/bcrypt"
 
 	jwtmiddleware "github.com/auth0/go-jwt-middleware"
 	"github.com/gorilla/mux"
@@ -147,12 +148,18 @@ func (ctrl UserCtrl) userLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	password := user.Password
+
 	defer r.Body.Close()
 
 	if err := ctrl.getUser(&user); err == nil {
-		userVM["user"] = user
-		userVM["token"] = getToken()
-		common.RespondWithJSON(w, http.StatusOK, userVM)
+		if !CheckPasswordHash(password, user.Password) {
+			common.RespondWithError(w, http.StatusInternalServerError, "Password is incorrect")
+		} else {
+			userVM["user"] = user
+			userVM["token"] = getToken()
+			common.RespondWithJSON(w, http.StatusOK, userVM)
+		}
 	} else {
 		common.RespondWithError(w, http.StatusInternalServerError, "Can't find user, Please sign up")
 	}
@@ -184,9 +191,21 @@ func (ctrl UserCtrl) createUser(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
+	hashedPassword, _ := HashPassword(user.Password)
+	user.Password = hashedPassword
 	if err := ctrl.DB.Create(&user).Error; err != nil {
 		common.RespondWithError(w, http.StatusInternalServerError, err.Error())
 	}
 
 	common.RespondWithJSON(w, http.StatusOK, user)
+}
+
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	return string(bytes), err
+}
+
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }
