@@ -14,11 +14,11 @@ import (
 	"strconv"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
-
 	jwtmiddleware "github.com/auth0/go-jwt-middleware"
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
+	"github.com/sethvargo/go-password/password"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserCtrl struct {
@@ -34,6 +34,25 @@ func (ctrl UserCtrl) InitializeRoutes() {
 	ctrl.Router.HandleFunc("/api/profileImg/{id:[0-9]+}", ctrl.uploadProfileImg).Methods("POST")
 	ctrl.Router.HandleFunc("/api/users/{id:[0-9]+}", ctrl.updateUser).Methods("PUT")
 	ctrl.Router.HandleFunc("/api/users/{id:[0-9]+}", ctrl.getUserById).Methods("GET")
+	ctrl.Router.HandleFunc("/api/reset-password", ctrl.resetPassword).Methods("POST")
+}
+
+func (ctrl UserCtrl) resetPassword(w http.ResponseWriter, r *http.Request) {
+	var user model.User
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&user); err != nil {
+		common.RespondWithError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+	if err := ctrl.getUser(&user); err == nil {
+		res, _ := password.Generate(8, 2, 1, false, false)
+		hashedPassword, _ := HashPassword(res)
+		user.Password = hashedPassword
+		ctrl.DB.Save(&user)
+		common.RespondWithJSON(w, http.StatusOK, res)
+	} else {
+		common.RespondWithError(w, http.StatusInternalServerError, "Can't find email")
+	}
 }
 
 func (ctrl UserCtrl) getUserById(w http.ResponseWriter, r *http.Request) {
@@ -153,7 +172,7 @@ func (ctrl UserCtrl) userLogin(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	if err := ctrl.getUser(&user); err == nil {
-		if !CheckPasswordHash(password, user.Password) {
+		if len(password) > 0 && !CheckPasswordHash(password, user.Password) {
 			common.RespondWithError(w, http.StatusInternalServerError, "Password is incorrect")
 		} else {
 			userVM["user"] = user
